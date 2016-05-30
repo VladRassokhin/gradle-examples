@@ -2,8 +2,8 @@
 // one line is auxiliary.
 apply plugin: 'java'
 
-sourceCompatibility = '1.7'
-targetCompatibility = '1.7'
+sourceCompatibility = '1.6'
+targetCompatibility = '1.6'
 
 apply plugin: 'idea'
 apply plugin: 'maven'
@@ -12,55 +12,49 @@ description 'A Java project that uses JNI'
 
 def nativeHeadersDir = file("$buildDir/nativeHeaders")
 
-task nativeHeaders {
+//noinspection UnnecessaryQualifiedReference
+def jvm = org.gradle.internal.jvm.Jvm.current()
+
+task generateJniHeaders(type: Exec) {
     def outputFile = file("$nativeHeadersDir/native.h")
     inputs.files sourceSets.main.output
     outputs.file outputFile
-    doLast {
-        outputFile.parentFile.mkdirs()
-        exec {
-            executable org.gradle.internal.jvm.Jvm.current().getExecutable('javah')
-            args '-o', outputFile
-            args '-classpath', sourceSets.main.output.classesDir
-            args 'example.jni.Util'
-        }
-    }
+    executable jvm.getExecutable('javah')
+    args "-o", outputFile
+    args "-classpath", sourceSets.main.output.classesDir
+    args 'example.jni.Util'
 }
 
 apply plugin: 'c'
 
-println "Using JNI headers from ${org.gradle.internal.jvm.Jvm.current().javaHome}/include"
 
 model {
-	components {
-		jniPlatform(NativeLibrarySpec) {
-			baseName 'native'
-//			targetPlatform 'x86'
-//			targetPlatform 'x64'
-sources {
-    c {
-        source {
-            srcDir "src/main/c"
-            include "**/*.c"
-        }
-        exportedHeaders {
-            srcDir "${nativeHeadersDir}"
-            //srcDir "src/include"
+    components {
+        jni(NativeLibrarySpec) {
+            baseName 'native'
+            sources {
+                c {
+                    source {
+                        srcDir "src/main/c"
+                        include "**/*.c"
+                    }
+                }
+            }
+            targetPlatform 'linux_amd64'
+            // Disable static version
+            binaries.withType(StaticLibraryBinarySpec) {
+                buildable = false
+            }
+            binaries.all {
+                if (targetPlatform.operatingSystem.linux) {
+                    println "Using JNI headers from JVM: ${jvm.javaHome}"
+                    cCompiler.args '-I', "${jvm.javaHome}/include"
+                    cCompiler.args '-I', "${jvm.javaHome}/include/linux"
+                }
+                cCompiler.args "-I${nativeHeadersDir}"
+            }
         }
     }
-}
-binaries.withType(StaticLibraryBinarySpec) {
-    buildable = false
-    }
-binaries.all {
-			if (targetPlatform.operatingSystem.linux) {
-				cCompiler.args '-I', "${org.gradle.internal.jvm.Jvm.current().javaHome}/include"
-				cCompiler.args '-I', "${org.gradle.internal.jvm.Jvm.current().javaHome}/include/linux"
-			}
-			cCompiler.args "-I${nativeHeadersDir}"
-}
-		}
-	}
 }
 
 model {
@@ -72,5 +66,5 @@ model {
     }
 }
 
-tasks.withType(CCompile) {task -> task.dependsOn nativeHeaders}
+tasks.withType(CCompile) { task -> task.dependsOn generateJniHeaders }
 
